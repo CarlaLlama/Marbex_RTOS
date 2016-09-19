@@ -41,11 +41,7 @@ xQueueHandle delayQueue;
 #define GREENLED LED4
 #define ORANGELED LED3
 #define BLUELED LED6
-#define LED_STACK_SIZE 128
-#define LED_TASK_PRIORITY 1 /* Low Priority */
 #define IDLE_PRIORITY tskIDLE_PRIORITY /* Lowest priority */
-#define BUTTON_STACK_SIZE 128
-#define BUTTON_TASK_PRIORITY 2 /* Higher Priority */
 #define MIN_STACK_SIZE configMINIMAL_STACK_SIZE
 //STUFF ADDED FOR MARBEX
 #define INIT_FREQ 1000
@@ -53,10 +49,14 @@ xQueueHandle delayQueue;
 /* Initializations */
 void GPIO_Configuration(void);
 void RCC_Configuration(void);
+void DMA_Configuration(void);
+void ADC_Configuration(void);
 /* Tasks */
 //STUFF ADDED FOR MARBEX
 static void vRowReadTask(void *pvparameters );
 static void vLineHighTask( void *pvparameters );
+static void vFreqChangeTask(void *pvparameters);
+static void vVolChangeTask(void *pvparameters);
 void PlaySound(uint8_t output);
 void delay_ms(uint32_t milli);
 
@@ -64,9 +64,6 @@ void delay_ms(uint32_t milli);
 uint64_t tickTime=0;        // Counts OS ticks (default = 1000Hz).
 uint64_t u64IdleTicks=0;    // Value of u64IdleTicksCnt is copied once per sec.
 uint64_t u64IdleTicksCnt=0; // Counts when the OS has no task to execute.
-uint16_t u16PWM1=0;
-uint32_t tempo = 120;		/* in bpm */
-uint32_t averageTime = 600;	/* in ms */
 //STUFF ADDED FOR MARBEX
 uint64_t frequency = INIT_FREQ;
 uint8_t counter = 0;
@@ -92,9 +89,13 @@ int main( void )
 	/* Initializations */
 	RCC_Configuration();
 	GPIO_Configuration(); // SET: PA4 - OUT; PA1, PA2, PA3 - IN;
+	DMA_Configuration();
+	ADC_Configuration();
 	/* Create Tasks */
 	xTaskCreate( vRowReadTask, ( signed char * ) "Read Row Task", MIN_STACK_SIZE, NULL, 3, NULL);
 	xTaskCreate( vLineHighTask, ( signed char * ) "Line High Task", MIN_STACK_SIZE, NULL, 4, NULL);
+	xTaskCreate( vFreqChangeTask, ( signed char * ) "Freq Change Task", MIN_STACK_SIZE, NULL, 5, NULL);
+	xTaskCreate( vVolChangeTask, ( signed char * ) "Vol Change Task", MIN_STACK_SIZE, NULL, 4, NULL);
 	vTaskStartScheduler();
 
     // Will only get here if there was insufficient memory to create
@@ -167,7 +168,6 @@ void PlaySound(uint8_t output){
  */
 static void vLineHighTask( void *pvparameters )
 {
-
 	for(;;)
 	{
 		GPIO_SetBits(GPIOA, GPIO_Pin_4);
@@ -180,6 +180,21 @@ static void vLineHighTask( void *pvparameters )
 		}
 		vTaskDelay(frequency);
 	}
+}
+
+/*
+ * Frequency Adjustment Task
+ */
+static void vFreqChangeTask(void *pvparameters){
+	for(;;){
+
+	}
+}
+/*
+ * Volume Adjustment Task
+ */
+static void vVolChangeTask(void *pvparameters){
+
 }
 /**
   * @brief  Configures the different system clocks.
@@ -205,7 +220,7 @@ void GPIO_Configuration(void)
 	GPIO_InitTypeDef GPIO_InitStruct;
 
 	/* Pack the struct */
-	GPIO_InitStruct.GPIO_Speed = GPIO_Mode_OUT;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_4;
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
@@ -227,6 +242,66 @@ void GPIO_Configuration(void)
 	GPIO_Init(GPIOA, &GPIO_InitStruct2);
 }
 
+/**
+  * @brief  Configures the DMA.
+  * @param  None
+  * @retval : None
+  */
+void DMA_Configuration(void)
+{
+	DMA_InitTypeDef DMA_InitStructure;
+
+	//Initialize the structure to default values
+	DMA_StructInit(&DMA_InitStructure);
+
+	/* PACK YOUR INIT STRUCT HERE */
+
+	/* Call Init function */
+	DMA_Init(DMA1_Stream5, &DMA_InitStructure);
+
+	/* Enable DMA */
+	DMA_Cmd(DMA1_Stream5, ENABLE);
+}
+
+/**
+  * @brief  Configures the ADC.
+  * @param  None
+  * @retval : None
+  */
+void ADC_Configuration(void){
+	// ADC connected to pin PC1 according to datasheet
+
+	GPIO_InitTypeDef GPIOInit;
+
+	/* Pack the struct */
+	GPIOInit.GPIO_Mode = GPIO_Mode_AN;
+	GPIOInit.GPIO_Pin = GPIO_Pin_1;
+	GPIOInit.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIOInit.GPIO_OType = GPIO_OType_PP;
+	GPIOInit.GPIO_PuPd = GPIO_PuPd_NOPULL;
+
+	/* Call Init function */
+		GPIO_Init(GPIOC, &GPIOInit);
+
+	ADC_InitTypeDef ADC_InitStructure;
+	ADC_InitStructure.ADC_Resolution = ADC_Resolution_8b;
+	ADC_InitStructure.ADC_ContinuousConvMode = ENABLE;
+	ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;
+	ADC_InitStructure.ADC_ScanConvMode = DISABLE;
+	ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_T1_CC1; //??;
+	ADC_InitStructure.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;; //??;
+	ADC_InitStructure.ADC_NbrOfConversion = 1;          /*!< Specifies the number of ADC conversions
+	                                               that will be done using the sequencer for
+	                                               regular channel group.
+	                                               This parameter must range from 1 to 16. */
+	ADC_Init(ADC1, &ADC_InitStructure);
+	ADC_RegularChannelConfig(ADC1,ADC_Channel_11,1,ADC_SampleTime_480Cycles);
+	ADC_DMARequestAfterLastTransferCmd(ADC1, ENABLE);
+	ADC_DMACmd(ADC1, ENABLE); //Enable ADC1 DMA
+	ADC_Cmd(ADC1, ENABLE); // Enable ADC1
+	ADC_SoftwareStartConv(ADC1); // Start ADC1 conversion
+
+}
 // This FreeRTOS callback function gets called once per tick (default = 1000Hz).
 // ---------------------------------------------------------------------------- 
 void vApplicationTickHook( void ) {
