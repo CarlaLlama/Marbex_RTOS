@@ -43,20 +43,25 @@ xQueueHandle delayQueue;
 #define BLUELED LED6
 #define IDLE_PRIORITY tskIDLE_PRIORITY /* Lowest priority */
 #define MIN_STACK_SIZE configMINIMAL_STACK_SIZE
+
 //STUFF ADDED FOR MARBEX
-#define INIT_FREQ 1000
+#define INIT_FREQ (configTICK_RATE_HZ/2)
 
 /* Initializations */
 void GPIO_Configuration(void);
 void RCC_Configuration(void);
 void DMA_Configuration(void);
 void ADC_Configuration(void);
+
+
 /* Tasks */
 //STUFF ADDED FOR MARBEX
-static void vRowReadTask(void *pvparameters );
-static void vLineHighTask( void *pvparameters );
-static void vFreqChangeTask(void *pvparameters);
-static void vVolChangeTask(void *pvparameters);
+	static void vCheckCat(void *pvparameters );
+	static void vRowReadTask(void *pvparameters );
+	static void vLineHighTask( void *pvparameters );
+	static void vFreqChangeTask(void *pvparameters);
+//static void vVolChangeTask(void *pvparameters);
+
 void PlaySound(uint8_t output);
 void delay_ms(uint32_t milli);
 
@@ -64,9 +69,11 @@ void delay_ms(uint32_t milli);
 uint64_t tickTime=0;        // Counts OS ticks (default = 1000Hz).
 uint64_t u64IdleTicks=0;    // Value of u64IdleTicksCnt is copied once per sec.
 uint64_t u64IdleTicksCnt=0; // Counts when the OS has no task to execute.
+
 //STUFF ADDED FOR MARBEX
 uint64_t frequency = INIT_FREQ;
 uint8_t counter = 0;
+uint8_t cat = 0;
 
 /**
   * @brief  This function handles External line 0 interrupt request.
@@ -90,12 +97,22 @@ int main( void )
 	RCC_Configuration();
 	GPIO_Configuration(); // SET: PA4 - OUT; PA1, PA2, PA3 - IN;
 	DMA_Configuration();
-	ADC_Configuration();
+	ADC_Configuration(); //pc1 for adc
+
+	STM_EVAL_LEDInit(LED3);
+	STM_EVAL_LEDOff(LED3);
+	STM_EVAL_LEDInit(LED4);
+	STM_EVAL_LEDOff(LED4);
+	STM_EVAL_PBInit(BUTTON_USER, BUTTON_MODE_GPIO);
+
 	/* Create Tasks */
-	xTaskCreate( vRowReadTask, ( signed char * ) "Read Row Task", MIN_STACK_SIZE, NULL, 3, NULL);
-	xTaskCreate( vLineHighTask, ( signed char * ) "Line High Task", MIN_STACK_SIZE, NULL, 4, NULL);
-	xTaskCreate( vFreqChangeTask, ( signed char * ) "Freq Change Task", MIN_STACK_SIZE, NULL, 5, NULL);
-	xTaskCreate( vVolChangeTask, ( signed char * ) "Vol Change Task", MIN_STACK_SIZE, NULL, 4, NULL);
+	// priority is second last parameter
+	xTaskCreate( vCheckCat, ( signed char *) "Check switch is Cat or Not Cat", MIN_STACK_SIZE, NULL, 3, NULL);
+	xTaskCreate( vRowReadTask, ( signed char * ) "Read Row Task", MIN_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate( vLineHighTask, ( signed char * ) "Line High Task", MIN_STACK_SIZE, NULL, 2, NULL);
+	xTaskCreate( vFreqChangeTask, ( signed char * ) "Freq Change Task", MIN_STACK_SIZE, NULL, 3, NULL);
+//	xTaskCreate( vVolChangeTask, ( signed char * ) "Vol Change Task", MIN_STACK_SIZE, NULL, 4, NULL);
+
 	vTaskStartScheduler();
 
     // Will only get here if there was insufficient memory to create
@@ -103,58 +120,49 @@ int main( void )
     for( ;; );  
 }
 
-/*
+/**
+ *Check if the switch is flicked to cat or not cat
+ */
+static void vCheckCat( void *pvparameters )
+{
+	uint8_t cat_switch = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_5);
+
+	for (;;){
+
+		if (cat_switch == 1){
+			cat = 1;
+		}
+
+		else{
+			cat = 0;
+		}
+
+		vTaskDelay(frequency);
+	}
+}
+/**
  * Row Read Task
  */
 static void vRowReadTask( void *pvparameters )
 {
-	uint8_t value0;
-	uint8_t value1;
-	uint8_t value2;
-	uint8_t value3;
+	// variables to store whether the current row value is high. Current column is determined by basic timing.
+	uint8_t row0, row1, row2, row3;
 
 	for(;;)
 	{
-		// SET ENABLE BITS, maybe do this in wiring?
-		if(counter & 00000001){
-			// SET PIN 0 HIGH FOR ALL MUX
-			GPIO_SetBits(GPIOA, GPIO_Pin_1);
-			//GPIO_SetBits(GPIOB, GPIO_Pin_1);
-			//GPIO_SetBits(GPIOC, GPIO_Pin_1);
-			//GPIO_SetBits(GPIOD, GPIO_Pin_1);
-		}
-		if(counter & 00000010){
-			// SET PIN 1 HIGH FOR ALL MUX
-			GPIO_SetBits(GPIOA, GPIO_Pin_2);
-			//GPIO_SetBits(GPIOB, GPIO_Pin_2);
-			//GPIO_SetBits(GPIOC, GPIO_Pin_2);
-			//GPIO_SetBits(GPIOD, GPIO_Pin_2);
-		}
-		if(counter & 00000001){
-			// SET PIN 2 HIGH FOR ALL MUX
-			GPIO_SetBits(GPIOA, GPIO_Pin_3);
-			//GPIO_SetBits(GPIOB, GPIO_Pin_3);
-			//GPIO_SetBits(GPIOC, GPIO_Pin_3);
-			//GPIO_SetBits(GPIOD, GPIO_Pin_3);
-		}
-		delay_ms(10);
-		// READ INPUT FOR ALL MUX
+		// get the input depending on the present value of the count
 
-		value0 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_0);
-		value1 = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_0);
-		value2 = GPIO_ReadInputDataBit(GPIOC, GPIO_Pin_0);
-		value3 = GPIO_ReadInputDataBit(GPIOD, GPIO_Pin_0);
+		row0 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_0);
+		row1 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_1);
+		row2 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_2);
+		row3 = GPIO_ReadInputDataBit(GPIOA, GPIO_Pin_3);
 
-		// READ HIGH ??
-		value0 = value0 & 00000001;
-		value1 = value1 & 00000001;
-		value2 = value2 & 00000001;
-		value3 = value3 & 00000001;
 
-		// WILL THIS WORK?
-		uint8_t output = value0 + (value1 << 1) + (value2 << 2) + (value3 << 3);
+		// WILL THIS WORK? - yes it does! 16 possible sound combinations. so depending on output, play appropriate sound
+		uint8_t output = row0 + (row1 << 1) + (row2 << 2) + (row3 << 3);
+
 		//THIS IS WHERE TO SEND TO CORRESPONDING SOUND OUTPUT
-		PlaySound(output);
+		//PlaySound(output);
 		vTaskDelay(frequency);
 	}
 }
@@ -164,21 +172,26 @@ void PlaySound(uint8_t output){
 }
 
 /*
- * Line High Task
+  Line High Task, used to generate the pulses to the ripple counter
  */
 static void vLineHighTask( void *pvparameters )
 {
+	GPIO_SetBits(GPIOA, GPIO_Pin_4);
 	for(;;)
 	{
-		GPIO_SetBits(GPIOA, GPIO_Pin_4);
-		delay_ms(10);
-		GPIO_ResetBits(GPIOA, GPIO_Pin_4);
+		STM_EVAL_LEDToggle(LED3);
+		// effectively generate a square wave. set to be high for 10ms, then reset to be low.
+		GPIO_ToggleBits(GPIOA, GPIO_Pin_4);	//PA4 = 0
+
+		// reset the counter so that we know which row we are checking.
 		if(counter == 7){
 			counter = 0;
 		}else{
 			counter++;
 		}
-		vTaskDelay(frequency);
+
+		//re-enter delay queue for 1ms.
+		vTaskDelay(frequency); // initial frequency = 1000Hz => 1ms
 	}
 }
 
@@ -186,16 +199,31 @@ static void vLineHighTask( void *pvparameters )
  * Frequency Adjustment Task
  */
 static void vFreqChangeTask(void *pvparameters){
-	for(;;){
 
+	for(;;){
+		if(STM_EVAL_PBGetState(BUTTON_USER) == Bit_SET)
+		{
+				//while button pressed do nothing
+				while(STM_EVAL_PBGetState(BUTTON_USER) == Bit_SET); //if button is pressed, do this
+
+				STM_EVAL_LEDToggle(LED4);
+
+
+				frequency = frequency*2;
+		}
+		vTaskDelay(frequency);
 	}
+
+	vTaskDelete(NULL);
 }
+
 /*
  * Volume Adjustment Task
- */
+ *
 static void vVolChangeTask(void *pvparameters){
 
-}
+}*/
+
 /**
   * @brief  Configures the different system clocks.
   * @param  None
@@ -214,6 +242,14 @@ void RCC_Configuration(void)
   * @brief  Configures the different GPIO ports.
   * @param  None
   * @retval : None
+  *
+  * @pins :
+  * 		INPUT:
+  * 			PA0,1,2,3 	= sound switches
+  * 			PA5 		= CAT/NOT CAT
+  *
+  * 		OUTPUT:
+  * 			PA4			= cclk for ripple timer
   */
 void GPIO_Configuration(void)
 {
@@ -233,7 +269,7 @@ void GPIO_Configuration(void)
 
 	/* Pack the struct */
 	GPIO_InitStruct2.GPIO_Mode = GPIO_Mode_IN;
-	GPIO_InitStruct2.GPIO_Pin = GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3;
+	GPIO_InitStruct2.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_5;
 	GPIO_InitStruct2.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_InitStruct2.GPIO_OType = GPIO_OType_PP;
 	GPIO_InitStruct2.GPIO_PuPd = GPIO_PuPd_NOPULL;
@@ -302,6 +338,7 @@ void ADC_Configuration(void){
 	ADC_SoftwareStartConv(ADC1); // Start ADC1 conversion
 
 }
+
 // This FreeRTOS callback function gets called once per tick (default = 1000Hz).
 // ---------------------------------------------------------------------------- 
 void vApplicationTickHook( void ) {
